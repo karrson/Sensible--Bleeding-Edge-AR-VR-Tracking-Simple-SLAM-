@@ -1,0 +1,10 @@
+cmake_minimum_required(VERSION 3.3)
+project(app CXX)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_package(depthai CONFIG REQUIRED)
+add_executable(${PROJECT_NAME} main.cpp camera.h config.h cv++/cv++.h miniGE.h)
+target_sources(${PROJECT_NAME} PRIVATE ${PROJECT_SOURCES})
+target_include_directories(${PROJECT_NAME} PRIVATE ${PROJECT_INCLUDE})
+target_link_libraries(${PROJECT_NAME} PRIVATE depthai::opencv)
