@@ -1,6 +1,5 @@
 #include <depthai/depthai.hpp>
-#include "PhysicalHomography.h"
-#include "Config.h"
+#include "config.h"
 #include <opencv2/core/quaternion.hpp>
 using namespace std;
 
@@ -9,7 +8,7 @@ shared_ptr<dai::node::ColorCamera> Camera; shared_ptr<dai::node::XLinkOut> Camer
 shared_ptr<dai::node::IMU> IMU; shared_ptr<dai::node::XLinkOut> IMU_Link;
 dai::CalibrationHandler Calibration;
 
-void PrepareCameraDriver(cv::Mat& K) 
+void PrepareCameraDriver(cv::Mat& K)
 {
     Pipeline = make_shared<dai::Pipeline>();
 
@@ -20,6 +19,7 @@ void PrepareCameraDriver(cv::Mat& K)
     Camera->preview.link(CameraLink->input);
 
     IMU = Pipeline->create<dai::node::IMU>(); IMU->enableIMUSensor(dai::IMUSensor::ARVR_STABILIZED_GAME_ROTATION_VECTOR, 100);
+    IMU->enableIMUSensor(dai::IMUSensor::LINEAR_ACCELERATION, 400);
     IMU->setBatchReportThreshold(1); IMU->setMaxBatchReports(1); IMU_Link = Pipeline->create<dai::node::XLinkOut>();
     IMU_Link->setStreamName("imu"); IMU->out.link(IMU_Link->input);
 
@@ -31,18 +31,19 @@ void PrepareCameraDriver(cv::Mat& K)
     K.at<double>(1, 2) = M[1][2];
 }
 
-void CameraUpdate(cvpp::Mat& Img) 
+void CameraUpdate(RobustVisualInertialOdometry::ImageMatrix& Img)
 {
     static cv::Mat K; if (K.empty()) PrepareCameraDriver(K);
 
-    Img = (cvpp::Mat)Device->getOutputQueue("rgb", 3, false)->get<dai::ImgFrame>()->getCvFrame();
+    Img = (RobustVisualInertialOdometry::ImageMatrix)Device->getOutputQueue("rgb", 3, false)->get<dai::ImgFrame>()->getCvFrame();
     cv::resize(Img, Img, cv::Size(ImageSize, ImageSize));
-    
-    auto imu = Device->getOutputQueue("imu", 3, false)->get<dai::IMUData>()->packets.back().rotationVector;
-    Img.meta.K = K;
-    Img.meta.Rot = (cv::Mat)cv::Quatd(imu.k, -imu.i, -imu.j, imu.real).toRotMat3x3(cv::QuatAssumeType::QUAT_ASSUME_NOT_UNIT);
-    Img.meta.Rot.convertTo(Img.meta.Rot, CV_64F);
 
-    static cv::Mat RotEye = Img.meta.Rot.clone();
-    Img.meta.Rot *= RotEye.inv();
+    auto imu = Device->getOutputQueue("imu", 3, false)->get<dai::IMUData>()->packets.back();
+    Img.Metadata.CameraIntrinsicsMatrix = K;
+    Img.Metadata.RotationMatrix = (cv::Mat)cv::Quatd(imu.rotationVector.k, -imu.rotationVector.i, -imu.rotationVector.j, imu.rotationVector.real).toRotMat3x3(cv::QuatAssumeType::QUAT_ASSUME_NOT_UNIT);
+    Img.Metadata.RotationMatrix.convertTo(Img.Metadata.RotationMatrix, CV_64F);
+    Img.Metadata.LinearAcceleration = cv::Vec3d(imu.acceleroMeter.x, imu.acceleroMeter.y, imu.acceleroMeter.z) * 100.0;
+
+    static cv::Mat RotEye = Img.Metadata.RotationMatrix.clone();
+    Img.Metadata.RotationMatrix *= RotEye.inv();
 }
