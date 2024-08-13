@@ -1,4 +1,4 @@
-#define FirstFrame	100
-#define ImageSize	256
-#define VIO_Alpha	0.005
-#define VIO_Beta	1.75
+#define firstFrame			100
+#define imageSize			180
+#define maxNodesInMap		256
+#define relocMaxSeconds		0.5

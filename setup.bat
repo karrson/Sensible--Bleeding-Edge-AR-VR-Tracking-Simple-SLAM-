@@ -1,2 +1,2 @@
-cmake -G "Visual Studio 17 2022" -A x64 -S . -B Sensible
+cmake -G "Visual Studio 17 2022" -A x64 -S . -B app
 pause

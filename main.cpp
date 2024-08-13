@@ -1,49 +1,151 @@
-#include "RobustVisualInertialOdometry.h"
+#include "cv++/cv++.h"
 #include "camera.h"
+#include "miniGE.h"
+using namespace std;
 
-int main() {
-	cv::Vec3d rvec;
-	cv::Vec3d tvec(0, 0, 20.24);
+vector<GameObject> scene;
+GameObject gameCamera = GameObject::CreatePrimitive(GameObject::PrimitiveType::Camera);
 
-	double DeltaTime = 0;
-	cv::Vec3d Velocity;
-	RobustVisualInertialOdometry::ImageMatrix PreviousImage;
-	for (int i = 0; i < FirstFrame; i++) {
-		RobustVisualInertialOdometry::ImageMatrix CurrentImage;
-		CameraUpdate(CurrentImage);
-	}
-	while (true) {
-		clock_t FrameStartTime = clock();
-		RobustVisualInertialOdometry::ImageMatrix CurrentImage;
-		CameraUpdate(CurrentImage);
-		if (PreviousImage.empty()) PreviousImage = CurrentImage.clone_with_metadata();
-		Velocity = RobustVisualInertialOdometry::from_images_to_global_translation(PreviousImage, CurrentImage,
-			cv::Vec3d(0, 0, VIO_Beta), Velocity, 
-			DeltaTime, RobustVisualInertialOdometry::PerSecond, VIO_Alpha);
-		tvec += Velocity * DeltaTime;
-		cv::Rodrigues(CurrentImage.Metadata.RotationMatrix.inv(), rvec);
-		PreviousImage = CurrentImage.clone_with_metadata();
+struct MapNode
+{
+	cvpp::Mat img;
+	cv::Mat pose;
+	clock_t time;
+};
 
-		cv::Vec3d Rot1 = cv::Quatd::createFromRotMat(CurrentImage.Metadata.RotationMatrix).inv().toRotVec();
-		cv::Quatd Rot2 = cv::Quatd::createFromRvec(cv::Vec3d(Rot1[0] * -1, Rot1[1], Rot1[2] * -1));
+vector<MapNode> mapNodes;
+cv::Mat cameraPoseRelocTarget = cv::Mat::eye(3, 3, CV_64F);
+cv::Mat cameraPose = cv::Mat::eye(3, 3, CV_64F);
 
-		cv::Vec3f CameraPosition(tvec[0], tvec[1] * -1, tvec[2]);
-		cv::Vec4f CameraRotation(Rot2.x, Rot2.y, Rot2.z, Rot2.w);
+cv::Mat previousRotation;
+cvpp::Mat previousImage;
+cv::Mat latestRenderedFrame;
 
-		std::cout << CameraPosition << CameraRotation << std::endl;
+bool isGameSessionActive = true;
+bool doInstantReloc = false;
+bool isDeltaTimeCalculated = false;
+double deltaTime = -1.0;
+int currentMapNodeIndex = 0;
 
-		cv::Mat PoseVis = cv::Mat::zeros(CurrentImage.size(), CV_8UC(3));
-		cv::drawFrameAxes(PoseVis, CurrentImage.Metadata.CameraIntrinsicsMatrix, cv::Mat(), rvec, tvec, 15.24);
-		cv::imshow("Pose", PoseVis);
-		cv::imshow("Image", CurrentImage);
-		static cv::Mat Map = cv::Mat::zeros(720, 720, CV_8UC3);
-		try { cv::circle(Map, cv::Point(360 + tvec[0] * 0.5, 360 - tvec[2] * 0.5), 3, cv::Scalar(0, 0, 255), -1); } catch (std::exception) { ; }
-		cv::imshow("Map", Map);
-		cv::waitKey(1);
-		clock_t FrameEndTime = clock();
-		double DT = ((double)FrameEndTime - (double)FrameStartTime) / CLOCKS_PER_SEC;
-		if (DT > 0 && DeltaTime <= 0) DeltaTime = DT;
+int main()
+{
+	for (int i = 0; i < firstFrame; i++)
+	{
+		cvpp::Mat tempImg;
+		cameraUpdate(tempImg);
 	}
 
-	return 0;
+	scene.push_back(gameCamera);
+
+	while (true)
+	{
+		clock_t frameStartTime = clock();
+
+		cvpp::Mat currentImg;
+		cameraUpdate(currentImg);
+		if (previousImage.empty()) previousImage = currentImg.cloneAll();
+		cvpp::Mat relCameraPose = cvpp::findHomography(previousImage, currentImg);
+		previousImage = currentImg.cloneAll();
+
+		if (!relCameraPose.empty())
+		{
+			cameraPose = relCameraPose * cameraPose;
+			cameraPoseRelocTarget = relCameraPose * cameraPoseRelocTarget;
+		}
+		else
+		{
+			isGameSessionActive = false;
+		}
+
+		bool addNodeToMap = isGameSessionActive && (mapNodes.empty() || (((double)frameStartTime - (double)mapNodes.back().time) / (double)CLOCKS_PER_SEC) >= relocMaxSeconds && cvpp::findHomography(mapNodes.back().img, currentImg).empty());
+
+		if (addNodeToMap)
+		{
+			MapNode mapNode;
+			mapNode.img = currentImg.cloneAll();
+			mapNode.pose = cameraPose.clone();
+			mapNode.time = frameStartTime;
+			mapNodes.push_back(mapNode);
+
+			if (mapNodes.size() > maxNodesInMap)
+			{
+				mapNodes.erase(mapNodes.begin());
+			}
+		}
+
+		bool hasReloc = false;
+
+		if (!mapNodes.empty())
+		{
+			currentMapNodeIndex %= (uint64_t)mapNodes.size();
+			{
+				MapNode& currentMapNode = mapNodes[currentMapNodeIndex];
+				cv::Mat relRelocPose = cvpp::findHomography(currentMapNode.img, currentImg);
+
+				if (!relRelocPose.empty()) 
+				{
+					cameraPoseRelocTarget = relRelocPose * currentMapNode.pose;
+					hasReloc = true;
+					currentMapNodeIndex = -1;
+				}
+			}
+			currentMapNodeIndex++;
+		}
+
+		if (isDeltaTimeCalculated) 
+		{
+			cameraPose += (cameraPoseRelocTarget - cameraPose) * clamp((1.0 / relocMaxSeconds) * deltaTime, 0.0, 1.0);
+		}
+
+		doInstantReloc = !isGameSessionActive;
+		
+		if (hasReloc)
+		{
+			isGameSessionActive = true;
+		}
+
+		if (doInstantReloc) cameraPose = cameraPoseRelocTarget.clone();
+
+		cvpp::Mat renderTexture = currentImg.cloneAll();
+
+		if (isGameSessionActive)
+		{
+			gameCamera.transform.pose = cameraPose.clone();
+			Graphics::SetRenderTarget(&renderTexture, &gameCamera);
+
+			for (const auto& gameObject : scene)
+			{
+				Graphics::DrawEntity(gameObject);
+			}
+
+			latestRenderedFrame = renderTexture.clone();
+			previousRotation = currentImg.meta.r.clone();
+		}
+
+		cv::Mat relocGuide = currentImg.meta.k * (currentImg.meta.r * previousRotation.inv()) * currentImg.meta.k.inv();
+		cv::warpPerspective(latestRenderedFrame, renderTexture, relocGuide, renderTexture.size());
+		cv::imshow("Game", renderTexture);
+
+		char keyPressed = cv::waitKey(1);
+
+		if (isGameSessionActive)
+		{
+			bool createNewGameObject = keyPressed == 'c';
+
+			if (createNewGameObject)
+			{
+				GameObject gameObject = GameObject::CreatePrimitive(GameObject::PrimitiveType::FrameAxesGizmo);
+				gameObject.transform.pose = cameraPose.clone();
+				gameObject.transform.size = 0.3;
+				gameObject.transform.thickness = 15;
+
+				scene.push_back(gameObject);
+			}
+		}
+
+		clock_t frameEndTime = clock();
+
+		deltaTime = (frameEndTime - frameStartTime) / (double)CLOCKS_PER_SEC;
+		isDeltaTimeCalculated = deltaTime > 0;
+	}
 }
