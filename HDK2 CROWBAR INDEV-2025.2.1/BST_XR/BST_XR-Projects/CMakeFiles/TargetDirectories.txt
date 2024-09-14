@@ -1,0 +1,3 @@
+C:/Users/hkarr/Documents/GitHub/BST_XR/BST_XR-Projects/CMakeFiles/BST_XR.dir
+C:/Users/hkarr/Documents/GitHub/BST_XR/BST_XR-Projects/CMakeFiles/ALL_BUILD.dir
+C:/Users/hkarr/Documents/GitHub/BST_XR/BST_XR-Projects/CMakeFiles/ZERO_CHECK.dir
