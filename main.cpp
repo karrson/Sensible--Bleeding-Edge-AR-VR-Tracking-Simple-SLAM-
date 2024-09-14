@@ -1,10 +1,6 @@
 #include "cv++/cv++.h"
 #include "camera.h"
-#include "miniGE.h"
 using namespace std;
-
-vector<GameObject> scene;
-GameObject gameCamera = GameObject::CreatePrimitive(GameObject::PrimitiveType::Camera);
 
 struct MapNode
 {
@@ -27,6 +23,28 @@ bool isDeltaTimeCalculated = false;
 double deltaTime = -1.0;
 int currentMapNodeIndex = 0;
 
+vector<cv::Mat> Anchors;
+
+void DrawEntity(cvpp::Mat& renderTexture, const cv::Mat& cameraPose, const cv::Mat& entityPose, float size, float thickness)
+{
+	vector<cv::Point3d> obj = { cv::Point3d(-0.5, 0.5, 0), cv::Point3d(0.5, 0.5, 0), cv::Point3d(0.5, -0.5, 0), cv::Point3d(-0.5, -0.5, 0) };
+	vector<cv::Point2d> src = { cv::Point2d(0, 0), cv::Point2d(imageSize, 0), cv::Point2d(imageSize, imageSize), cv::Point2d(0, imageSize) };
+	vector<cv::Point2d> dst;
+
+	cv::Mat screenPose = (cv::Mat)(cameraPose * entityPose.inv());
+
+	if (std::fabs(cv::Quatd::createFromRotMat(renderTexture.meta.k.inv() * screenPose * renderTexture.meta.k).toEulerAngles(cv::QuatEnum::EXT_XYZ)[0]) < 0.5 ||
+		std::fabs(cv::Quatd::createFromRotMat(renderTexture.meta.k.inv() * screenPose * renderTexture.meta.k).toEulerAngles(cv::QuatEnum::EXT_XYZ)[2]) < 0.5)
+	{
+		cv::perspectiveTransform(src, dst, screenPose);
+
+		cv::Vec3d r, t;
+		cv::solvePnP(obj, dst, renderTexture.meta.k, renderTexture.meta.d, r, t);
+
+		cv::drawFrameAxes(renderTexture, renderTexture.meta.k, renderTexture.meta.d, r, t, size, thickness);
+	}
+}
+
 int main()
 {
 	for (int i = 0; i < firstFrame; i++)
@@ -34,8 +52,6 @@ int main()
 		cvpp::Mat tempImg;
 		cameraUpdate(tempImg);
 	}
-
-	scene.push_back(gameCamera);
 
 	while (true)
 	{
@@ -82,7 +98,7 @@ int main()
 				MapNode& currentMapNode = mapNodes[currentMapNodeIndex];
 				cv::Mat relRelocPose = cvpp::findHomography(currentMapNode.img, currentImg);
 
-				if (!relRelocPose.empty()) 
+				if (!relRelocPose.empty())
 				{
 					cameraPoseRelocTarget = relRelocPose * currentMapNode.pose;
 					hasReloc = true;
@@ -92,13 +108,13 @@ int main()
 			currentMapNodeIndex++;
 		}
 
-		if (isDeltaTimeCalculated) 
+		if (isDeltaTimeCalculated)
 		{
 			cameraPose += (cameraPoseRelocTarget - cameraPose) * clamp((1.0 / relocMaxSeconds) * deltaTime, 0.0, 1.0);
 		}
 
 		doInstantReloc = !isGameSessionActive;
-		
+
 		if (hasReloc)
 		{
 			isGameSessionActive = true;
@@ -110,12 +126,9 @@ int main()
 
 		if (isGameSessionActive)
 		{
-			gameCamera.transform.pose = cameraPose.clone();
-			Graphics::SetRenderTarget(&renderTexture, &gameCamera);
-
-			for (const auto& gameObject : scene)
+			for (const auto& pose : Anchors)
 			{
-				Graphics::DrawEntity(gameObject);
+				DrawEntity(renderTexture, cameraPose, pose, 0.3f, 15);
 			}
 
 			latestRenderedFrame = renderTexture.clone();
@@ -124,22 +137,20 @@ int main()
 
 		cv::Mat relocGuide = currentImg.meta.k * (currentImg.meta.r * previousRotation.inv()) * currentImg.meta.k.inv();
 		cv::warpPerspective(latestRenderedFrame, renderTexture, relocGuide, renderTexture.size());
+
+
 		cv::imshow("Game", renderTexture);
 
 		char keyPressed = cv::waitKey(1);
 
 		if (isGameSessionActive)
 		{
-			bool createNewGameObject = keyPressed == 'c';
+			bool createNewPose = keyPressed == 'c';
 
-			if (createNewGameObject)
+			if (createNewPose)
 			{
-				GameObject gameObject = GameObject::CreatePrimitive(GameObject::PrimitiveType::FrameAxesGizmo);
-				gameObject.transform.pose = cameraPose.clone();
-				gameObject.transform.size = 0.3;
-				gameObject.transform.thickness = 15;
-
-				scene.push_back(gameObject);
+				// Add new pose to frameAxesPoses
+				Anchors.push_back(cameraPose.clone());
 			}
 		}
 
