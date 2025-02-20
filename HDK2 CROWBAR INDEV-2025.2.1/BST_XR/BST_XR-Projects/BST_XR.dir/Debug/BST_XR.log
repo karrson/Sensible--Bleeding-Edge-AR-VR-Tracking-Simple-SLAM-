@@ -1,7 +1,0 @@
-﻿  Building Custom Rule C:/Users/hkarr/Documents/GitHub/BST_XR/CMakeLists.txt
-  BST_XR.cpp
-C:\Users\hkarr\Documents\GitHub\BST_XR\BST_XR-Source\BST_XR.cpp(152,51): warning C4552: '/': result of expression not used
-LINK : warning LNK4075: ignoring '/INCREMENTAL' due to '/PROFILE' specification
-  BST_XR.vcxproj -> C:\Users\hkarr\Documents\GitHub\BST_XR\BST_XR-Projects\Debug\BST_XR.exe
-  'pwsh.exe' is not recognized as an internal or external command,
-  operable program or batch file.
